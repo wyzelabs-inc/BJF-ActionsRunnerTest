@@ -1,0 +1,74 @@
+# Sets the name of the workflow in GitHub's UI
+name: CI
+
+# Sets the triggers for the workflow.
+on:
+  # Run workflow on push to these specifc branches
+  push:
+    branches:
+      - master
+      - release/**
+      - feature/**
+  # Run workflow on pull request to these specifc branches
+  pull_request:
+    branches:
+      - master
+      - release/**
+      - feature/**
+  # Run workflow on on demand through UI
+  workflow_dispatch:
+
+jobs:
+  build:
+    # Run on hosted VM provided by GitHub
+    runs-on: wyze-firmware-develop
+    timeout-minutes: 180
+
+    steps:
+    # Checkout the source code for this repo, recusively pulling in submodules
+    - uses: actions/checkout@v2
+      with:
+        fetch-depth: '0'
+
+    # Install system packages needed to build
+    # - name: Install tools
+    #   run: |
+    #     sudo apt-get update
+    #     sudo apt-get upgrade --assume-yes
+    #     sudo apt-get install --assume-yes --no-install-recommends \
+    #         git gcc g++ binutils patch bzip2 flex make gettext pkg-config \
+    #         unzip zlib1g-dev libc6-dev subversion libncurses5-dev \
+    #         gawk sharutils curl libxml-parser-perl python-yaml \
+    #         ocaml-nox ocaml ocaml-findlib libssl1.0-dev libfdt-dev \
+    #         gettext-base device-tree-compiler u-boot-tools
+
+          
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v2
+      with:
+        aws-access-key-id: ${{ secrets.BJF_AWS_ECR_PULL_ACCESS_ID }}
+        aws-secret-access-key: ${{ secrets.BJF_AWS_ECR_PULL_ACCESS_KEY }}
+        aws-region: ${{ secrets.BJF_AWS_ECR_DEFAULT_REGION }}
+
+    - name: Login to Amazon ECR
+      id: login-ecr
+      uses: aws-actions/amazon-ecr-login@v1
+
+    # Build image
+    - name: Build image
+      env: 
+        DOCKER_IMAGES: ${{ steps.login-ecr.outputs.registry }}
+    
+        CI_BUILD_NUMBER: ${{ github.run_number }}
+      working-directory: ./
+      run: |
+        echo "CI_BUILD_NUMBER=$GITHUB_RUN_NUMBER" >> $GITHUB_ENV
+        bash scripts/docker_build.sh >> /tmp/build_log.txt 2>&1
+
+    # Upload build log on failure
+    - name: Upload build log on failure
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: build-log
+        path: /tmp/build_log.txt
